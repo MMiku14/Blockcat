@@ -30,12 +30,12 @@ const CFG = {
 
 关键行为脚本清单
 
-| 脚本路径 | 类型 | 风险 | 功能 |
-|---------|------|------|------|
-| /abc/fixed_ui_*.js | 广告注入 | L5 | 从配置池拉取并注入浮窗广告 |
-| /abc/fixed_jump_*.js | 跳转劫持 | L5 | 概率性强制跳转到博彩落地页 |
-| /000/report_error_video/script.js | 反馈上报 | L3 | 用户举报失效视频，众包内容质检 |
-| /cn/home/web/static/player/dplayer/DPlayer.min.js | 播放器 | L2 | 视频播放 |
+| 脚本路径 | 类型 | 功能 |
+|---------|------|------|
+| /abc/fixed_ui_*.js | 广告注入 | 从配置池拉取并注入浮窗广告 |
+| /abc/fixed_jump_*.js | 跳转劫持 | 概率性强制跳转到博彩落地页 |
+| /000/report_error_video/script.js | 反馈上报 | 用户举报失效视频，众包内容质检 |
+| /cn/home/web/static/player/dplayer/DPlayer.min.js | 播放器 | 视频播放 |
 
 **重要**：站点**未使用任何标准第三方统计**（无百度统计 `hm.baidu.com`、无CNZZ、无Google Analytics），而是改用**自建私有追踪端点** `/000/flink/`，避免通过公共统计平台暴露站点关联与真实身份。
 
