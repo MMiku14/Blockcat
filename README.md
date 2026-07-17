@@ -50,3 +50,31 @@ const CFG = {
 | /abc/data_*.json | fetch | 广告/跳转配置池（含图片、落地页、到期日、投放范围、权重） |
 
 (*为6位随机16进制字符)
+
+`fixed_jump.js` 的核心逻辑还原为伪代码如下：
+
+```javascript
+visitCount = getCookie("jump_visit_count") + 1;   // 访问计数（Cookie，1天有效）
+setCookie("jump_visit_count", visitCount, 1);
+if (visitCount <= 3) return;                        // ① 前3次访问豁免，提升留存
+
+rand = Math.ceil(Math.random() * 100);             // 1-100随机数
+if (rand >= 91)                                     // ② 10%概率静默探测域名存活
+    new Image().src = "/000/flink/check_domain_v2.php";
+
+list = await fetch("/abc/data_934d1f.json");        // 拉取跳转配置池
+jumpPool = list.filter(x => x.tiao_zhuan && !过期); // 筛选启用且未过期项
+
+if (rand <= 15 && jumpPool.length > 0) {            // ③ 15%概率触发跳转
+    setTimeout(() => {
+        sendStat(id, 3, 0);                         // ④ 先静默上报
+        location.href = "/000/flink/url.php?id=..."; // ⑤ 3秒后经服务端中转跳转
+    }, 3000);
+}
+```
+
+**四重反侦察设计**：
+1. **前3次豁免**：新用户/审核人员首次访问不触发跳转，降低被标记概率
+2. **概率触发**：仅15%概率跳转（老用户），非100%，规避自动化检测的确定性判定
+3. **延迟触发**：3秒延迟，模拟用户正常浏览行为
+4. **服务端中转**：经 `url.php` 302跳转，浏览器地址栏不直接暴露博彩URL，规避安全拦截
