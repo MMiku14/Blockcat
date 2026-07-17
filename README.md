@@ -28,8 +28,6 @@ const CFG = {
 ```
 使用只需要导入到相应的浏览器中的油猴或者自带的脚本功能
 
-关键行为脚本清单
-
 | 脚本路径 | 类型 | 功能 |
 |---------|------|------|
 | /abc/fixed_ui_*.js | 广告注入 | 从配置池拉取并注入浮窗广告 |
@@ -37,9 +35,6 @@ const CFG = {
 | /000/report_error_video/script.js | 反馈上报 | 用户举报失效视频，众包内容质检 |
 | /cn/home/web/static/player/dplayer/DPlayer.min.js | 播放器 | 视频播放 |
 
-**重要**：站点**未使用任何标准第三方统计**（无百度统计 `hm.baidu.com`、无CNZZ、无Google Analytics），而是改用**自建私有追踪端点** `/000/flink/`，避免通过公共统计平台暴露站点关联与真实身份。
-
-### 追踪与上报端点
 
 | 端点 | 方式 | 用途 |
 |------|------|------|
@@ -51,27 +46,6 @@ const CFG = {
 
 (*为6位随机16进制字符)
 
-`fixed_jump.js` 的核心逻辑还原为伪代码如下：
-
-```javascript
-visitCount = getCookie("jump_visit_count") + 1;   // 访问计数（Cookie，1天有效）
-setCookie("jump_visit_count", visitCount, 1);
-if (visitCount <= 3) return;                        // ① 前3次访问豁免，提升留存
-
-rand = Math.ceil(Math.random() * 100);             // 1-100随机数
-if (rand >= 91)                                     // ② 10%概率静默探测域名存活
-    new Image().src = "/000/flink/check_domain_v2.php";
-
-list = await fetch("/abc/data_934d1f.json");        // 拉取跳转配置池
-jumpPool = list.filter(x => x.tiao_zhuan && !过期); // 筛选启用且未过期项
-
-if (rand <= 15 && jumpPool.length > 0) {            // ③ 15%概率触发跳转
-    setTimeout(() => {
-        sendStat(id, 3, 0);                         // ④ 先静默上报
-        location.href = "/000/flink/url.php?id=..."; // ⑤ 3秒后经服务端中转跳转
-    }, 3000);
-}
-```
 
 **四重反侦察设计**：
 1. **前3次豁免**：新用户/审核人员首次访问不触发跳转，降低被标记概率
