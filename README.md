@@ -37,7 +37,6 @@ const CFG = {
 | /000/report_error_video/script.js | 反馈上报 | L3 | 用户举报失效视频，众包内容质检 |
 | /cn/home/web/static/player/dplayer/DPlayer.min.js | 播放器 | L2 | 视频播放 |
 
-(*为6位随机16进制字符)
 **重要**：站点**未使用任何标准第三方统计**（无百度统计 `hm.baidu.com`、无CNZZ、无Google Analytics），而是改用**自建私有追踪端点** `/000/flink/`，避免通过公共统计平台暴露站点关联与真实身份。
 
 ### 追踪与上报端点
@@ -48,4 +47,6 @@ const CFG = {
 | /000/flink/url.php | 302中转跳转 | 隐藏真实博彩落地页URL，规避来源追踪 |
 | /000/flink/check_domain_v2.php | Image预加载 | 域名存活检测（10%概率触发，配合永久跳转自动切换） |
 | /000/report_error_video/report.php | fetch GET | 失效视频举报收集 |
-| /abc/data_934d1f.json | fetch | 广告/跳转配置池（含图片、落地页、到期日、投放范围、权重） |
+| /abc/data_*.json | fetch | 广告/跳转配置池（含图片、落地页、到期日、投放范围、权重） |
+
+(*为6位随机16进制字符)
