@@ -26,3 +26,4 @@ const CFG = {
   exposeGlobal: false,     // 是否暴露调试 API 到 window.__bc__
 };
 ```
+使用只需要导入到相应的浏览器中的油猴或者自带的脚本功能
