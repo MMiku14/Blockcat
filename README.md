@@ -6,25 +6,32 @@
 可在脚本顶部的 `CFG` 对象中按需调整：
 
 ```javascript
-const CFG = {
-  log: true,               // 是否开启日志
-  logLevel: 'INFO',        // 日志级别：DEBUG / INFO / WARN / ERROR / SUCCESS
-  mockResponses: true,     // 拦截后是否返回模拟响应（无副作用，建议开启）
-  m3u8Cleanse: true,       // 是否清理 M3U8 广告段
-  antiDetect: true,        // 是否开启反检测
-  blockPopups: true,       // 是否拦截弹窗广告
-  blockAutoplay: true,     // 是否阻止广告资源自动播放
-  sanitizeCookies: true,   // 是否定时清理广告 Cookie
-  hlsHijacker: true,       // 是否劫持 Hls.js 加载源监控
-  strictNonStdPort: false, // 是否严格拦截第三方非标端口
-  cheapTldBlock: false,    // 是否拦截廉价 TLD（.xyz .casa 等）
-  blockPunycode: true,     // 是否拦截 Punycode 域名
-  blockCloud: false,       // 是否拦截 AWS/Azure 临时域名
-  lruSize: 800,            // LRU 缓存大小
-  cookiePollMs: 4000,      // Cookie 巡逻间隔 (ms)
-  pendingMax: 5000,        // DOM 突变批处理阈值
-  exposeGlobal: false,     // 是否暴露调试 API 到 window.__bc__
-};
+/* ═══ SECTION 1 · CONFIG ═══ */
+  const CFG = {
+    log: true, logLevel: 'INFO',               // 日志总开关与最低输出级别：DEBUG/INFO/WARN/ERROR/SUCCESS
+    mockResponses: true,                        // 拦截命中后返回伪造响应，而非直接空响应/中断请求
+    m3u8Cleanse: true,                          // 净化 m3u8 播放列表，剥离广告分片
+    antiDetect: true,                           // 伪装 Function.prototype.toString，隐藏 hook 痕迹
+    blockPopups: true,                          // 拦截 window.open 弹窗
+    blockAutoplay: true,                        // 拦截命中黑名单资源的媒体自动播放
+    sanitizeCookies: true,                      // 巡查清理广告相关 Cookie 与全局锁变量
+    hlsHijacker: true,                          // 监听 Hls.js 实例挂载（仅记录日志，不改变行为）
+    strictNonStdPort: false,                    // 严格模式：拦截所有第三方非标端口（可能误杀正常业务）
+    cheapTldBlock: false,                       // 拦截廉价高风险 TLD 域名
+    blockPunycode: true,                        // 拦截 Punycode 混淆域名（xn--）
+    blockCloud: false,                          // 拦截云服务商临时域名（AWS/Azure 等）
+    domInsertBlock: true,                       // 拦截恶意节点的 DOM 插入（appendChild/append/before 等）
+    domWriteBlock: true,                        // 拦截 document.write/writeln 注入的恶意片段
+    malClassScan: true,                         // 扫描混淆广告 class 名（b_xxxxxx / TypeXXX 样式）
+    lruSize: 800,                               // decide() 判决结果 LRU 缓存容量
+    cookiePollMs: 4000,                         // Cookie 巡查间隔（毫秒）
+    lockPollMul: 4,                             // 全局锁变量巡查间隔倍数（实际间隔 = cookiePollMs * lockPollMul）
+    pendingMax: 5000,                           // MutationObserver 突变队列上限，超限立即同步刷新防 OOM
+    mockDelayMs: 1,                             // XHR 伪造响应触发 load 事件的延迟（毫秒）
+    m3u8SafetyRatio: 0.5,                       // m3u8 广告分片占比超过该阈值时放弃净化，防止误杀
+    autoReport: false,                          // 页面卸载/隐藏时是否自动输出统计报告；默认关闭，改用 API.report()/API.stats() 手动查看
+    exposeGlobal: false,                        // 是否将诊断 API 挂载到 window（以隐藏 Symbol 键存放）
+  };
 ```
 使用只需要导入到相应的浏览器中的油猴或者自带的脚本功能
 
