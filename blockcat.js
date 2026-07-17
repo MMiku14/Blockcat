@@ -17,16 +17,34 @@
 
   /* ═══ SECTION 1 · CONFIG ═══ */
   const CFG = {
-    log: true, logLevel: 'INFO',
-    mockResponses: true, m3u8Cleanse: true, antiDetect: true,
-    blockPopups: true, blockAutoplay: true, sanitizeCookies: true, hlsHijacker: true,
-    strictNonStdPort: false, cheapTldBlock: false, blockPunycode: true, blockCloud: false, // #8 云域名默认关闭
-    lruSize: 800, cookiePollMs: 4000,
-    pendingMax: 5000, // #15 突变队列上限
-    exposeGlobal: false, // #4 默认不暴露到全局
+    log: true, logLevel: 'INFO',               // 日志总开关与最低输出级别：DEBUG/INFO/WARN/ERROR/SUCCESS
+    mockResponses: true,                        // 拦截命中后返回伪造响应，而非直接空响应/中断请求
+    m3u8Cleanse: true,                          // 净化 m3u8 播放列表，剥离广告分片
+    antiDetect: true,                           // 伪装 Function.prototype.toString，隐藏 hook 痕迹
+    blockPopups: true,                          // 拦截 window.open 弹窗
+    blockAutoplay: true,                        // 拦截命中黑名单资源的媒体自动播放
+    sanitizeCookies: true,                      // 巡查清理广告相关 Cookie 与全局锁变量
+    hlsHijacker: true,                          // 监听 Hls.js 实例挂载（仅记录日志，不改变行为）
+    strictNonStdPort: false,                    // 严格模式：拦截所有第三方非标端口（可能误杀正常业务）
+    cheapTldBlock: false,                       // 拦截廉价高风险 TLD 域名
+    blockPunycode: true,                        // 拦截 Punycode 混淆域名（xn--）
+    blockCloud: false,                          // 拦截云服务商临时域名（AWS/Azure 等）
+    domInsertBlock: true,                       // 拦截恶意节点的 DOM 插入（appendChild/append/before 等）
+    domWriteBlock: true,                        // 拦截 document.write/writeln 注入的恶意片段
+    malClassScan: true,                         // 扫描混淆广告 class 名（b_xxxxxx / TypeXXX 样式）
+    lruSize: 800,                               // decide() 判决结果 LRU 缓存容量
+    cookiePollMs: 4000,                         // Cookie 巡查间隔（毫秒）
+    lockPollMul: 4,                             // 全局锁变量巡查间隔倍数（实际间隔 = cookiePollMs * lockPollMul）
+    pendingMax: 5000,                           // MutationObserver 突变队列上限，超限立即同步刷新防 OOM
+    mockDelayMs: 1,                             // XHR 伪造响应触发 load 事件的延迟（毫秒）
+    m3u8SafetyRatio: 0.5,                       // m3u8 广告分片占比超过该阈值时放弃净化，防止误杀
+    autoReport: false,                          // 页面卸载/隐藏时是否自动输出统计报告；默认关闭，改用 API.report()/API.stats() 手动查看
+    exposeGlobal: false,                        // 是否将诊断 API 挂载到 window（以隐藏 Symbol 键存放）
   };
-  // #2 合法 TS 包 = 188 字节，避免播放器错误重试暴露拦截
+  // 合法 TS 包 = 188 字节，避免播放器错误重试暴露拦截
   const FAKE_TS = (() => { const b = new Uint8Array(188); b[0]=0x47; b[1]=0x1F; b[2]=0xFF; b[3]=0x10; return b.buffer; })();
+  const BODY_ADCONFIG = '[]';
+  const BODY_ADSCRIPT = '/* bc */';
 
   /* ═══ SECTION 2 · LOG (lazy, leveled) ═══ */
   const LV = { DEBUG: 1, INFO: 2, WARN: 3, ERROR: 4, SUCCESS: 5 };
@@ -50,12 +68,15 @@
 
   /* ═══ SECTION 3 · STATS ═══ */
   const Stats = { fetch:0, xhr:0, beacon:0, popup:0, script:0, img:0, domInsert:0, domRemoved:0, m3u8:0, cookie:0, autoplay:0, cacheHit:0 };
-  let reported = false;
-  const report = () => { if (reported) return; reported = true; Log.info('统计报告', '拦截汇总', { ...Stats }); };
-  // #17 visibilitychange 双保险（移动端后台杀进程 beforeunload 不保证触发）
-  addEventListener('beforeunload', report);
-  addEventListener('pagehide', report);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') report(); });
+  // 手动接口：随时调用查看当前累计拦截统计，不再依赖页面关闭时的一次性弹出
+  const report = () => Log.info('统计报告', '拦截汇总', { ...Stats });
+  if (CFG.autoReport) {
+    let done = false;
+    const auto = () => { if (done) return; done = true; report(); };
+    addEventListener('beforeunload', auto);
+    addEventListener('pagehide', auto);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') auto(); });
+  }
 
   /* ═══ SECTION 4 · ANTI-DETECT (native-code mimic) ═══ */
   const SYM = Symbol('__bc__');
@@ -66,9 +87,7 @@
       value: function toString() { return (typeof this === 'function' && this[SYM]) ? this[SYM] : nts.call(this); },
       writable: true, configurable: true, enumerable: false,
     });
-    // 钩子自身也伪装成 native，避免 Function.prototype.toString.toString() 泄露真实源码
     Function.prototype.toString[SYM] = 'function toString() { [native code] }';
-    // #10 SYM 用 defineProperty 隐藏，避免 Object.getOwnPropertySymbols 枚举暴露
     mimic = (fn, name) => { try { Object.defineProperty(fn, 'name', { value: name, configurable: true }); } catch (_) {}
       try { Object.defineProperty(fn, SYM, { value: 'function ' + name + '() { [native code] }', enumerable: false, configurable: true }); } catch (_) {}
       return fn; };
@@ -88,6 +107,8 @@
   const V = (type, reason) => Object.freeze({ blocked:true, type, reason });
   const V_ADSCRIPT = V('AdScript','黑产广告脚本');
   const V_ADCONFIG = V('AdConfig','广告中心化配置');
+  const V_PUNYCODE = V('Punycode','Punycode 混淆域名');
+  const V_CHEAPTLD = V('CheapTLD','廉价TLD');
 
   /* ═══ SECTION 7 · PathTrie (single + terminal wildcard) ═══ */
   class PathTrie {
@@ -115,26 +136,28 @@
       for(const x of l){ const nx=n.c[x]; if(!nx) return null; n=nx; if(n.end) return n.meta; } return n.end?n.meta:null; }
   }
   const HT = new HostTrie();
-  // #8 云域名规则默认不生效（CFG.blockCloud=false），保留规则供需要时开启
+  // 云域名规则默认不生效（CFG.blockCloud=false），保留规则供需要时开启
   HT.add('amazonaws.com', V('CloudInfra','AWS 临时域名'));
   HT.add('cloudapp.azure.com', V('CloudInfra','Azure 临时域名'));
 
   /* ═══ SECTION 9 · single-pass multi-keyword scan ═══ */
   const AD_KW = ['/fixed_ui_','/fixed_jump_'];
   function hasAny(s, arr){ for(let i=0;i<arr.length;i++) if(s.indexOf(arr[i])!==-1) return true; return false; }
-  // #18 移除合法 TLD（wiki/top/help/work/ink/lol），仅保留高风险廉价 TLD
   const CHEAP = new Set(['skin','casa','cfd','buzz','fit','boats','pics','homes','beer','autos','sbs','xyz']);
+  function isCheapTLD(host){ const d=host.lastIndexOf('.'); return d!==-1 && CHEAP.has(host.slice(d+1)); }
+  function isNonStdPort(port){ return !!port && port!=='80' && port!=='443'; }
 
-  // #11 支持 IPv4 与 IPv6（带方括号或裸写）
+  // 支持 IPv4 与 IPv6（带方括号或裸写）
   function isIP(h){
     if(!h) return false;
-    if(h[0]==='['){ return h.indexOf(':')!==-1; } // [::1] 形式
-    if(h.indexOf(':')!==-1) return true; // 裸 IPv6
+    if(h[0]==='['){ return h.indexOf(':')!==-1; }
+    if(h.indexOf(':')!==-1) return true;
     let d=0,s=0,on=false;
     for(let i=0;i<h.length;i++){ const c=h.charCodeAt(i);
       if(c===46){ if(!on||s>255) return false; d++; s=0; on=false; } else if(c>=48&&c<=57){ s=s*10+(c-48); on=true; } else return false; }
     return d===3&&on&&s<=255;
   }
+  function parseURL(u, base){ try{ return new URL(u, base||location.origin); }catch(_){ return null; } }
 
   /* ═══ SECTION 10 · DECISION PIPELINE (short-circuit) ═══ */
   const SELF = location.hostname.toLowerCase();
@@ -143,34 +166,33 @@
     if(typeof raw!=='string'){ try{ raw=String(raw); }catch(_){ return ALLOW; } if(!raw) return ALLOW; }
     const c = cache.get(raw); if(c!==undefined) return c;
 
-    let u;
-    try { u = new URL(raw, location.origin); }
-    catch(_){ const r = hasAny(raw, AD_KW) ? V_ADSCRIPT : ALLOW; cache.set(raw, r); return r; }
+    const u = parseURL(raw);
+    if(!u){ const r = hasAny(raw, AD_KW) ? V_ADSCRIPT : ALLOW; cache.set(raw, r); return r; }
 
     const path=u.pathname, host=u.hostname.toLowerCase(), port=u.port;
     let r = ALLOW;
 
-    // 1 · PathTrie
+    // PathTrie
     const pm = PT.match(path);
     if(pm) r = pm;
-    // #12 站点特定 /abc/ 逻辑仅在同源时生效，避免污染无关站点
+    // 站点特定 /abc/ 逻辑仅在同源时生效，避免污染无关站点
     if(!r.blocked && host===SELF && path.indexOf('/abc/')!==-1){
       if(path.endsWith('.js') && hasAny(path, AD_KW)) r = V_ADSCRIPT;
       else if(path.endsWith('.json') && path.indexOf('/data_')!==-1) r = V_ADCONFIG;
     }
-    // 2 · HostTrie
+    // HostTrie
     if(!r.blocked && CFG.blockCloud){ const hm = HT.match(host); if(hm) r = hm; }
-    // 3 · non-standard port
-    if(!r.blocked && port && port!=='80' && port!=='443'){
+    // 非标端口
+    if(!r.blocked && isNonStdPort(port)){
       if(host!=='localhost' && host!=='127.0.0.1' && host!==SELF){
         if(CFG.strictNonStdPort) r = V('BadPort','第三方非标端口 :'+port);
         else if(isIP(host)) r = V('BadPortIP','IP+非标端口 '+host+':'+port);
       }
     }
-    // 4 · cheap TLD
-    if(!r.blocked && CFG.cheapTldBlock){ const d=host.lastIndexOf('.'); if(d!==-1 && CHEAP.has(host.slice(d+1))) r = V('CheapTLD','廉价TLD'); }
-    // 5 · punycode
-    if(!r.blocked && CFG.blockPunycode && host.indexOf('xn--')!==-1) r = V('Punycode','Punycode 混淆域名');
+    // 廉价 TLD
+    if(!r.blocked && CFG.cheapTldBlock && isCheapTLD(host)) r = V_CHEAPTLD;
+    // Punycode
+    if(!r.blocked && CFG.blockPunycode && host.indexOf('xn--')!==-1) r = V_PUNYCODE;
 
     if(r.blocked) Log.warn('Policy','['+r.type+'] '+r.reason+' → '+raw.slice(0,120));
     cache.set(raw, r);
@@ -179,8 +201,8 @@
 
   /* ═══ SECTION 11 · MOCK factory ═══ */
   function mock(type){
-    if(type==='AdConfig') return new Response('[]',{status:200,headers:{'Content-Type':'application/json'}});
-    if(type==='AdScript') return new Response('/* bc */',{status:200,headers:{'Content-Type':'application/javascript'}});
+    if(type==='AdConfig') return new Response(BODY_ADCONFIG,{status:200,headers:{'Content-Type':'application/json'}});
+    if(type==='AdScript') return new Response(BODY_ADSCRIPT,{status:200,headers:{'Content-Type':'application/javascript'}});
     return new Response(FAKE_TS,{status:200,headers:{'Content-Type':'video/MP2T'}});
   }
 
@@ -200,12 +222,12 @@
     const ad=new Set();
     for(let k=0;k<segs.length;k++){ const s=segs[k], sd=s.dir||'(root)', ul=s.url.toLowerCase();
       let bad = sd!==main || ul.indexOf('ad_')!==-1 || ul.indexOf('creative')!==-1 || ul.indexOf('fixed_')!==-1 || ul.indexOf('flink')!==-1;
-      // #16 相对路径以 src 为 base 解析，避免静默漏判
-      if(!bad){ try{ const uu=new URL(s.url, src||location.origin), h=uu.hostname.toLowerCase(), d=h.lastIndexOf('.');
-        if(CFG.cheapTldBlock && d!==-1 && CHEAP.has(h.slice(d+1))) bad=true;
-        if(uu.port && uu.port!=='80' && uu.port!=='443' && isIP(h)) bad=true; }catch(_){} }
+      // 相对路径以 src 为 base 解析，避免静默漏判
+      if(!bad){ const uu=parseURL(s.url, src); if(uu){ const h=uu.hostname.toLowerCase();
+        if(CFG.cheapTldBlock && isCheapTLD(h)) bad=true;
+        if(isNonStdPort(uu.port) && isIP(h)) bad=true; } }
       if(bad) ad.add(k); }
-    if(ad.size > segs.length*0.5){ Log.warn('M3U8','广告比率过高，触发防误杀'); return text; }
+    if(ad.size > segs.length*CFG.m3u8SafetyRatio){ Log.warn('M3U8','广告比率过高，触发防误杀'); return text; }
     const adLines=new Set();
     for(const idx of ad){ const sl=segs[idx].line; adLines.add(sl);
       for(let r=sl-1;r>=0;r--){ const t=lines[r].trim();
@@ -222,7 +244,7 @@
     const url = typeof res==='string' ? res : (res instanceof Request ? res.url : (res && typeof res.href==='string' ? res.href : ''));
     const d = decide(url);
     if(d.blocked){ Stats.fetch++; return Promise.resolve(CFG.mockResponses ? mock(d.type) : new Response(null,{status:200})); }
-    // #14 保留原始参数（含 Request 对象的 body/headers），不丢弃上下文
+    // 保留原始参数（含 Request 对象的 body/headers），不丢弃上下文
     return o.apply(this, arguments).then(resp => {
       if(CFG.m3u8Cleanse && M3U8_RE.test(url) && resp.ok)
           return resp.clone().text().then(t => { const c=M3U8.clean(t,url);
@@ -244,15 +266,15 @@
       const m=meta.get(this);
       if(m && m.d.blocked){ Stats.xhr++;
         if(CFG.mockResponses){ const mt=m.d.type, isTxt=(mt==='AdConfig'||mt==='AdScript');
-          // #9 JSON 回退：AdScript 类型返回空对象而非注释，避免 JSON.parse 抛错
-          const rb=(mt==='AdConfig')?'[]':'/* bc */';
+          // JSON 回退：AdScript 类型返回空对象而非注释，避免 JSON.parse 抛错
+          const rb=(mt==='AdConfig')?BODY_ADCONFIG:BODY_ADSCRIPT;
           const jsonFallback=(mt==='AdConfig')?[]:{};
           try{ Object.defineProperties(this,{ readyState:{get(){return 4;},configurable:true}, status:{get(){return 200;},configurable:true},
             statusText:{get(){return 'OK';},configurable:true},
             response:{get(){ if(this.responseType==='json'){ try{return JSON.parse(rb);}catch(_){return jsonFallback;} } return isTxt?rb:FAKE_TS; },configurable:true},
             responseText:{get(){return rb;},configurable:true}, responseURL:{get(){return m.url;},configurable:true} });
             setTimeout(()=>{ try{this.dispatchEvent(new Event('readystatechange'));}catch(_){}
-              try{this.dispatchEvent(new Event('load'));}catch(_){} try{this.dispatchEvent(new Event('loadend'));}catch(_){} },1);
+              try{this.dispatchEvent(new Event('load'));}catch(_){} try{this.dispatchEvent(new Event('loadend'));}catch(_){} },CFG.mockDelayMs);
             return; }catch(_){}}
         this.abort(); return; }
       if(CFG.m3u8Cleanse && m && m.url && M3U8_RE.test(m.url)){
@@ -271,7 +293,7 @@
   if(navigator.sendBeacon){ const o=navigator.sendBeacon;
     navigator.sendBeacon = mimic(function sendBeacon(url,data){ if(decide(url).blocked){ Stats.beacon++; return true; } return o.apply(this,arguments); },'sendBeacon'); }
 
-  // #13 fake window 对象补全常用属性/方法，避免访问时 TypeError
+  // fake window 对象补全常用属性/方法，避免访问时 TypeError
   if(CFG.blockPopups){ const o=window.open;
     const fake=Object.freeze({
       closed:true, focus(){}, blur(){}, close(){}, postMessage(){}, print(){}, stop(){},
@@ -292,8 +314,7 @@
 
   /* ═══ SECTION 16 · SHARED malicious-class scanner (unified, used everywhere) ═══ */
   function ws(c){ return c===32||c===9||c===10||c===12||c===13; }
-  // #7 收紧扫描：要求 b_ 后紧跟 6 位十六进制/数字；Type 前缀改为要求全大写混淆样式，
-  //     避免误杀 b_header / TypeSelector 等合法 class（@match *://*/* 下影响所有站点）
+  // 要求 b_ 后紧跟 6 位十六进制/数字，Type 前缀要求全大写混淆样式，避免误杀 b_header / TypeSelector 等合法 class
   function isHexLike(cls, start, end){ for(let i=start;i<end;i++){ const c=cls.charCodeAt(i);
     const ok=(c>=48&&c<=57)||(c>=97&&c<=102)||(c>=65&&c<=70); if(!ok) return false; } return true; }
   function scanMalToken(cls, pre, min, max, hexBody){ const pl=pre.length; let idx=cls.indexOf(pre);
@@ -302,7 +323,7 @@
         let e=idx+pl; while(e<cls.length && !ws(cls.charCodeAt(e))) e++; const l=e-idx;
         if(l>=min && l<=max){ if(!hexBody || isHexLike(cls, idx+pl, e)) return true; } }
       idx=cls.indexOf(pre, idx+1); } return false; }
-  function isMalClass(cls){ return !!cls && typeof cls==='string' &&
+  function isMalClass(cls){ return CFG.malClassScan && !!cls && typeof cls==='string' &&
     (scanMalToken(cls,'b_',8,8,true) || scanMalToken(cls,'Type',11,13,true)); }
 
   /* ═══ SECTION 17 · DOM property proxies (src setters + insert hooks) ═══ */
@@ -313,59 +334,48 @@
   if(iD) Object.defineProperty(HTMLImageElement.prototype,'src',{ get(){return iD.get.call(this);},
     set: mimic(function src(v){ if(decide(v).blocked){ Stats.img++; return; } iD.set.call(this,v); },'set src'), configurable:true, enumerable:true });
 
-  // 统一节点判定：命中恶意规则返回 true
+  function isEl(n){ return !!n && n.nodeType===1; }
+
   function nodeBlocked(node){ try{
-    if(node.nodeType!==1) return false;
+    if(!isEl(node)) return false;
     if(isMalClass(node.className)) return true;
     const s=node.src||node.href; if(s && decide(s).blocked) return true;
   }catch(_){} return false; }
 
-  // #1 replaceChild 需返回被替换的旧节点 ref（其余方法返回新节点或 undefined）
-  for(const method of ['appendChild','insertBefore','replaceChild']){ const o=Node.prototype[method]; if(!o) continue;
-    Node.prototype[method]= mimic(function(child, ref){ if(child && child.nodeType===1 && nodeBlocked(child)){
-        Stats.domInsert++; return method==='replaceChild' ? ref : child; }
-      return o.apply(this, arguments); }, method); }
+  if(CFG.domInsertBlock){
+    // replaceChild 返回被替换的旧节点，其余方法返回新节点或 undefined
+    for(const method of ['appendChild','insertBefore','replaceChild']){ const o=Node.prototype[method]; if(!o) continue;
+      Node.prototype[method]= mimic(function(child, ref){ if(isEl(child) && nodeBlocked(child)){
+          Stats.domInsert++; return method==='replaceChild' ? ref : child; }
+        return o.apply(this, arguments); }, method); }
 
-  // #6 补全现代插入 API：append/prepend/after/before/replaceWith/insertAdjacentElement
-  function filterNodes(args){ let hit=false; const out=[];
-    for(const a of args){ if(a && typeof a==='object' && a.nodeType===1 && nodeBlocked(a)){ hit=true; continue; } out.push(a); }
-    return { out, hit }; }
-  for(const method of ['append','prepend','after','before','replaceWith']){
-    for(const proto of [Element.prototype, (typeof DocumentFragment!=='undefined'?DocumentFragment.prototype:null)]){
-      if(!proto || !proto[method]) continue; const o=proto[method];
-      proto[method]= mimic(function(...args){ const { out, hit }=filterNodes(args);
-        if(hit) Stats.domInsert++; return o.apply(this, out); }, method); } }
-  if(Element.prototype.insertAdjacentElement){ const o=Element.prototype.insertAdjacentElement;
-    Element.prototype.insertAdjacentElement= mimic(function insertAdjacentElement(pos, el){
-      if(el && el.nodeType===1 && nodeBlocked(el)){ Stats.domInsert++; return el; } return o.apply(this, arguments); },'insertAdjacentElement'); }
+    const filterNodes = (args) => { let hit=false; const out=[];
+      for(const a of args){ if(isEl(a) && nodeBlocked(a)){ hit=true; continue; } out.push(a); }
+      return { out, hit }; };
+    for(const method of ['append','prepend','after','before','replaceWith']){
+      for(const proto of [Element.prototype, (typeof DocumentFragment!=='undefined'?DocumentFragment.prototype:null)]){
+        if(!proto || !proto[method]) continue; const o=proto[method];
+        proto[method]= mimic(function(...args){ const { out, hit }=filterNodes(args);
+          if(hit) Stats.domInsert++; return o.apply(this, out); }, method); } }
+    if(Element.prototype.insertAdjacentElement){ const o=Element.prototype.insertAdjacentElement;
+      Element.prototype.insertAdjacentElement= mimic(function insertAdjacentElement(pos, el){
+        if(isEl(el) && nodeBlocked(el)){ Stats.domInsert++; return el; } return o.apply(this, arguments); },'insertAdjacentElement'); }
+  }
 
-  // #6 document.write / writeln 拦截明显含拦截关键词的注入片段
-  function writeBlocked(str){ if(typeof str!=='string' || !str) return false;
+  if(CFG.domWriteBlock){
     // 仅在片段含 script/iframe 且命中广告关键词时拦截，避免误伤正常 write
-    if(str.indexOf('<script')===-1 && str.indexOf('<iframe')===-1) return false;
-    return hasAny(str, AD_KW) || str.indexOf('/000/flink')!==-1; }
-  for(const method of ['write','writeln']){ const o=document[method]; if(!o) continue;
-    document[method]= mimic(function(...args){ for(const s of args) if(writeBlocked(s)){ Stats.domInsert++; return; }
-      return o.apply(this, args); }, method); }
+    const writeBlocked = (str) => { if(typeof str!=='string' || !str) return false;
+      if(str.indexOf('<script')===-1 && str.indexOf('<iframe')===-1) return false;
+      return hasAny(str, AD_KW) || str.indexOf('/000/flink')!==-1; };
+    for(const method of ['write','writeln']){ const o=document[method]; if(!o) continue;
+      document[method]= mimic(function(...args){ for(const s of args) if(writeBlocked(s)){ Stats.domInsert++; return; }
+        return o.apply(this, args); }, method); }
+  }
 
   /* ═══ SECTION 18 · COOKIE + GLOBAL-LOCK patrol ═══ */
   const CK=new Set(['jump_visit_count','__ad_visited']);
   const LK=['LOCK_FIXED_','SYS_REQ_','CSS_uc','LOCK_JUMP_'];
-  // #5 用 Proxy 陷阱拦截全局锁变量写入，替代每 4 秒 Object.keys(window) 全量枚举
   function isLockKey(k){ if(typeof k!=='string') return false; for(const pf of LK) if(k.indexOf(pf)===0) return true; return false; }
-  let lockGuardActive = false;
-  try {
-    // 在 window 上按需 defineProperty 拦截（惰性守卫，仅对匹配前缀的赋值生效）
-    const seen = new Set();
-    const guard = () => {
-      // 轻量：只对当前已存在的锁键做清理，配合下方 setter 拦截未来写入
-      for (const pf of LK) { /* 前缀无法穷举，交由 setter 处理 */ }
-    };
-    // 拦截未来写入：劫持常见锁键的定义（通过 Reflect + defineProperty 惰性挂载）
-    // 使用一个后台守卫函数，仅在检测到疑似锁键时清理，而非枚举全局
-    lockGuardActive = true;
-    void guard; void seen;
-  } catch(_) {}
 
   function patrolCookie(){ try{ for(const p of document.cookie.split(';')){ const n=p.trim().split('=')[0];
       if(CK.has(n)){ const exp='=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
@@ -373,8 +383,7 @@
         try{ document.cookie=n+exp+' domain=.'+location.hostname+';'; }catch(_){}
         Stats.cookie++; } } }catch(_){} }
 
-  // #5 全局锁：改为「首轮清理一次 + 低频（cookiePollMs*4）轻量兜底」，且用 for...in 只枚举可枚举属性
-  //     并配合 setter 守卫，避免高频全量 Object.keys(window)
+  // 低频巡查（cookiePollMs * lockPollMul），用 for...in 只枚举可枚举属性，避免高频全量扫描
   function patrolLocks(){ try{
     for(const k in window){ if(isLockKey(k)){ try{ delete window[k]; }catch(_){} } }
   }catch(_){} }
@@ -382,8 +391,7 @@
   if(CFG.sanitizeCookies){
     patrolCookie(); patrolLocks();
     setInterval(patrolCookie, CFG.cookiePollMs);
-    // 锁变量清理降频到 4 倍间隔，显著降低卡顿
-    setInterval(patrolLocks, CFG.cookiePollMs * 4);
+    setInterval(patrolLocks, CFG.cookiePollMs * CFG.lockPollMul);
   }
 
   /* ═══ SECTION 19 · Unified MutationObserver (microtask batch, shared scanner) ═══ */
@@ -397,8 +405,8 @@
       if(isMalClass(n.className)){ n.remove(); removed++; continue; }
       if(n.tagName==='IMG' && n.src && decide(n.src).blocked){ n.remove(); removed++; } }catch(_){} }
     if(removed) Stats.domRemoved+=removed; }
-  const obs=new MutationObserver(muts=>{ for(const mu of muts) for(const n of mu.addedNodes) if(n.nodeType===1){
-      // #15 队列上限保护：超限时立即同步刷新，防止突变风暴 OOM
+  const obs=new MutationObserver(muts=>{ for(const mu of muts) for(const n of mu.addedNodes) if(isEl(n)){
+      // 队列上限保护：超限时立即同步刷新，防止突变风暴 OOM
       if(pending.length>=CFG.pendingMax){ Log.warn('DOM','突变队列超限，切换同步刷新'); flush(); }
       pending.push(n); }
     if(!scheduled && pending.length){ scheduled=true; schedule(flush); } });
@@ -406,9 +414,8 @@
   document.documentElement ? start() : addEventListener('DOMContentLoaded', start, { once:true });
 
   /* ═══ SECTION 20 · DIAGNOSTIC API ═══ */
-  // #3 版本号统一为 VERSION
-  // #4 默认不暴露到全局；仅在显式开启时挂载，且用不可枚举 Symbol 键降低指纹
-  const API = { stats:()=>({ ...Stats }), cache:()=>({ size:cache.size, cap:CFG.lruSize }), decide, version:VERSION };
+  // 默认不暴露到全局；仅在 exposeGlobal 开启时挂载，且用不可枚举 Symbol 键降低指纹
+  const API = { stats:()=>({ ...Stats }), cache:()=>({ size:cache.size, cap:CFG.lruSize }), decide, report, version:VERSION };
   if(CFG.exposeGlobal){
     try { Object.defineProperty(window, SYM, { value: API, enumerable:false, configurable:true, writable:false }); } catch(_) {}
   }
