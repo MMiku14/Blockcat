@@ -41,7 +41,6 @@
     autoReport: false,                          // 页面卸载/隐藏时是否自动输出统计报告；默认关闭，改用 API.report()/API.stats() 手动查看
     exposeGlobal: false,                        // 是否将诊断 API 挂载到 window（以隐藏 Symbol 键存放）
   };
-  // 合法 TS 包 = 188 字节，避免播放器错误重试暴露拦截
   const FAKE_TS = (() => { const b = new Uint8Array(188); b[0]=0x47; b[1]=0x1F; b[2]=0xFF; b[3]=0x10; return b.buffer; })();
   const BODY_ADCONFIG = '[]';
   const BODY_ADSCRIPT = '/* bc */';
@@ -68,7 +67,6 @@
 
   /* ═══ SECTION 3 · STATS ═══ */
   const Stats = { fetch:0, xhr:0, beacon:0, popup:0, script:0, img:0, domInsert:0, domRemoved:0, m3u8:0, cookie:0, autoplay:0, cacheHit:0 };
-  // 手动接口：随时调用查看当前累计拦截统计，不再依赖页面关闭时的一次性弹出
   const report = () => Log.info('统计报告', '拦截汇总', { ...Stats });
   if (CFG.autoReport) {
     let done = false;
@@ -136,7 +134,6 @@
       for(const x of l){ const nx=n.c[x]; if(!nx) return null; n=nx; if(n.end) return n.meta; } return n.end?n.meta:null; }
   }
   const HT = new HostTrie();
-  // 云域名规则默认不生效（CFG.blockCloud=false），保留规则供需要时开启
   HT.add('amazonaws.com', V('CloudInfra','AWS 临时域名'));
   HT.add('cloudapp.azure.com', V('CloudInfra','Azure 临时域名'));
 
@@ -175,7 +172,6 @@
     // PathTrie
     const pm = PT.match(path);
     if(pm) r = pm;
-    // 站点特定 /abc/ 逻辑仅在同源时生效，避免污染无关站点
     if(!r.blocked && host===SELF && path.indexOf('/abc/')!==-1){
       if(path.endsWith('.js') && hasAny(path, AD_KW)) r = V_ADSCRIPT;
       else if(path.endsWith('.json') && path.indexOf('/data_')!==-1) r = V_ADCONFIG;
@@ -222,7 +218,6 @@
     const ad=new Set();
     for(let k=0;k<segs.length;k++){ const s=segs[k], sd=s.dir||'(root)', ul=s.url.toLowerCase();
       let bad = sd!==main || ul.indexOf('ad_')!==-1 || ul.indexOf('creative')!==-1 || ul.indexOf('fixed_')!==-1 || ul.indexOf('flink')!==-1;
-      // 相对路径以 src 为 base 解析，避免静默漏判
       if(!bad){ const uu=parseURL(s.url, src); if(uu){ const h=uu.hostname.toLowerCase();
         if(CFG.cheapTldBlock && isCheapTLD(h)) bad=true;
         if(isNonStdPort(uu.port) && isIP(h)) bad=true; } }
@@ -244,7 +239,6 @@
     const url = typeof res==='string' ? res : (res instanceof Request ? res.url : (res && typeof res.href==='string' ? res.href : ''));
     const d = decide(url);
     if(d.blocked){ Stats.fetch++; return Promise.resolve(CFG.mockResponses ? mock(d.type) : new Response(null,{status:200})); }
-    // 保留原始参数（含 Request 对象的 body/headers），不丢弃上下文
     return o.apply(this, arguments).then(resp => {
       if(CFG.m3u8Cleanse && M3U8_RE.test(url) && resp.ok)
           return resp.clone().text().then(t => { const c=M3U8.clean(t,url);
@@ -266,7 +260,6 @@
       const m=meta.get(this);
       if(m && m.d.blocked){ Stats.xhr++;
         if(CFG.mockResponses){ const mt=m.d.type, isTxt=(mt==='AdConfig'||mt==='AdScript');
-          // JSON 回退：AdScript 类型返回空对象而非注释，避免 JSON.parse 抛错
           const rb=(mt==='AdConfig')?BODY_ADCONFIG:BODY_ADSCRIPT;
           const jsonFallback=(mt==='AdConfig')?[]:{};
           try{ Object.defineProperties(this,{ readyState:{get(){return 4;},configurable:true}, status:{get(){return 200;},configurable:true},
@@ -293,7 +286,6 @@
   if(navigator.sendBeacon){ const o=navigator.sendBeacon;
     navigator.sendBeacon = mimic(function sendBeacon(url,data){ if(decide(url).blocked){ Stats.beacon++; return true; } return o.apply(this,arguments); },'sendBeacon'); }
 
-  // fake window 对象补全常用属性/方法，避免访问时 TypeError
   if(CFG.blockPopups){ const o=window.open;
     const fake=Object.freeze({
       closed:true, focus(){}, blur(){}, close(){}, postMessage(){}, print(){}, stop(){},
@@ -314,7 +306,6 @@
 
   /* ═══ SECTION 16 · SHARED malicious-class scanner (unified, used everywhere) ═══ */
   function ws(c){ return c===32||c===9||c===10||c===12||c===13; }
-  // 要求 b_ 后紧跟 6 位十六进制/数字，Type 前缀要求全大写混淆样式，避免误杀 b_header / TypeSelector 等合法 class
   function isHexLike(cls, start, end){ for(let i=start;i<end;i++){ const c=cls.charCodeAt(i);
     const ok=(c>=48&&c<=57)||(c>=97&&c<=102)||(c>=65&&c<=70); if(!ok) return false; } return true; }
   function scanMalToken(cls, pre, min, max, hexBody){ const pl=pre.length; let idx=cls.indexOf(pre);
@@ -343,7 +334,6 @@
   }catch(_){} return false; }
 
   if(CFG.domInsertBlock){
-    // replaceChild 返回被替换的旧节点，其余方法返回新节点或 undefined
     for(const method of ['appendChild','insertBefore','replaceChild']){ const o=Node.prototype[method]; if(!o) continue;
       Node.prototype[method]= mimic(function(child, ref){ if(isEl(child) && nodeBlocked(child)){
           Stats.domInsert++; return method==='replaceChild' ? ref : child; }
@@ -363,7 +353,6 @@
   }
 
   if(CFG.domWriteBlock){
-    // 仅在片段含 script/iframe 且命中广告关键词时拦截，避免误伤正常 write
     const writeBlocked = (str) => { if(typeof str!=='string' || !str) return false;
       if(str.indexOf('<script')===-1 && str.indexOf('<iframe')===-1) return false;
       return hasAny(str, AD_KW) || str.indexOf('/000/flink')!==-1; };
@@ -383,7 +372,6 @@
         try{ document.cookie=n+exp+' domain=.'+location.hostname+';'; }catch(_){}
         Stats.cookie++; } } }catch(_){} }
 
-  // 低频巡查（cookiePollMs * lockPollMul），用 for...in 只枚举可枚举属性，避免高频全量扫描
   function patrolLocks(){ try{
     for(const k in window){ if(isLockKey(k)){ try{ delete window[k]; }catch(_){} } }
   }catch(_){} }
@@ -406,7 +394,6 @@
       if(n.tagName==='IMG' && n.src && decide(n.src).blocked){ n.remove(); removed++; } }catch(_){} }
     if(removed) Stats.domRemoved+=removed; }
   const obs=new MutationObserver(muts=>{ for(const mu of muts) for(const n of mu.addedNodes) if(isEl(n)){
-      // 队列上限保护：超限时立即同步刷新，防止突变风暴 OOM
       if(pending.length>=CFG.pendingMax){ Log.warn('DOM','突变队列超限，切换同步刷新'); flush(); }
       pending.push(n); }
     if(!scheduled && pending.length){ scheduled=true; schedule(flush); } });
@@ -414,7 +401,6 @@
   document.documentElement ? start() : addEventListener('DOMContentLoaded', start, { once:true });
 
   /* ═══ SECTION 20 · DIAGNOSTIC API ═══ */
-  // 默认不暴露到全局；仅在 exposeGlobal 开启时挂载，且用不可枚举 Symbol 键降低指纹
   const API = { stats:()=>({ ...Stats }), cache:()=>({ size:cache.size, cap:CFG.lruSize }), decide, report, version:VERSION };
   if(CFG.exposeGlobal){
     try { Object.defineProperty(window, SYM, { value: API, enumerable:false, configurable:true, writable:false }); } catch(_) {}
