@@ -1,0 +1,97 @@
+.cpn_pc {
+	float: left;
+	width: 100%;
+	padding: 1px !important;
+	margin: 0;
+	box-sizing: border-box;
+	position: relative;
+}
+
+.cpn_pc a {
+	text-align: center;
+	color: #333;
+	font-size: 14px;
+	line-height: 20px;
+	position: relative;
+	width: 100%;
+	display: block;
+}
+
+.cpn_pc a img {
+	width: 100%;
+	max-height: 60px;
+}
+
+.cpn_pc a p {
+	width: 100%;
+	position: absolute;
+	width: 100%;
+	left: 0;
+	bottom: 0;
+	background: rgba(0, 0, 0, 0.6);
+	color: #fff;
+	text-align: center;
+	height: 24px;
+	line-height: 24px;
+	overflow: hidden;
+	font-size: 12px;
+	margin: 0;
+	padding: 0;
+}
+
+#dgf_pc {
+	position: relative;
+	width: 100%;
+	overflow: visible !important;
+	display: block!important;
+	margin: auto;
+	padding: 0;
+	border: 0;
+	max-width:962px
+}
+
+#dgf_pc * {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	min-width: none;
+	max-width: none;
+	display: block;
+}
+
+.dgf_pc * img {
+	max-width: none;
+	max-height: none;
+	width: auto;
+	height: auto;
+}
+
+.dgfFa_pc {
+	width: 100%;
+	float: left;
+	text-align: center;
+	background-size: 100% auto !important;
+	position: relative;
+}
+
+#dgfFi_pc {
+	width: 100%;
+	float: left;
+	visibility: hidden;
+}
+
+.dgfCR_pc {
+	bottom: 0;
+	position: absolute;
+	right: 0;
+	margin: 0;
+}
+
+.dgfCR_pc a {
+	float: right;
+}
+
+.dgfCR_pc img {
+	float: right;
+	width: 28px !important;
+}
