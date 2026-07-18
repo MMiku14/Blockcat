@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ◆ Blockcat /拦猫
 // @namespace    http://tampermonkey.net/
-// @version      3.0.0
+// @version      1.0.0
 // @description  Rule Pipeline · URL缓存 · 统一拦截入口 · 响应过滤插件 · 统一DOM清道夫 · 微任务批处理
 // @author       cat & Blockcat-Optimizer
 // @match        *://*/*
@@ -12,7 +12,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '3.0.0';
+  const VERSION = '1.0.0';
 
   /* ═══ SECTION 1 · CONFIG ═══ */
   const CFG = {
