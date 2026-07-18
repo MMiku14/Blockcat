@@ -24,7 +24,6 @@
     blockPopups: true,                          // 拦截 window.open 弹窗
     blockAutoplay: true,                        // 拦截命中黑名单资源的媒体自动播放
     sanitizeCookies: true,                      // 巡查清理广告相关 Cookie 与全局锁变量
-    hlsHijacker: true,                          // 监听 Hls.js 实例挂载（仅记录日志，不改变行为）
     strictNonStdPort: false,                    // 严格模式：拦截所有第三方非标端口（可能误杀正常业务）
     cheapTldBlock: false,                       // 拦截廉价高风险 TLD 域名
     blockPunycode: true,                        // 拦截 Punycode 混淆域名（xn--）
@@ -294,11 +293,6 @@
       location:{ href:'', assign(){}, replace(){}, reload(){}, toString(){return '';} }, document:null,
     });
     window.open = mimic(function open(url,t,f){ if(url && decide(url).blocked){ Stats.popup++; return fake; } return o.apply(this,arguments); },'open'); }
-
-  if(CFG.hlsHijacker){ let H=window.Hls; Object.defineProperty(window,'Hls',{ get(){return H;}, set(v){ H=v;
-    if(typeof H==='function' && !H.__bc){ H.__bc=true; try{ const ls=H.prototype.loadSource;
-      H.prototype.loadSource=function(src){ Log.info('Hls','流加载: '+src); return ls.apply(this,arguments); };
-      Log.ok('Hls','捕获 Hls.js 实例'); }catch(e){ Log.error('Hls',e.message); } } }, configurable:true }); }
 
   if(CFG.blockAutoplay){ const o=HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = mimic(function play(){ try{ const s=this.currentSrc||this.src;
