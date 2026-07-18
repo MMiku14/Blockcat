@@ -25,7 +25,6 @@
     blockAutoplay: true,                        // 拦截命中黑名单资源的媒体自动播放
     sanitizeCookies: true,                      // 巡查清理广告相关 Cookie 与全局锁变量
     strictNonStdPort: false,                    // 严格模式：拦截所有第三方非标端口（可能误杀正常业务）
-    cheapTldBlock: false,                       // 拦截廉价高风险 TLD 域名
     blockPunycode: true,                        // 拦截 Punycode 混淆域名（xn--）
     blockCloud: false,                          // 拦截云服务商临时域名（AWS/Azure 等）
     domInsertBlock: true,                       // 拦截恶意节点的 DOM 插入（appendChild/append/before 等）
@@ -184,8 +183,6 @@
         else if(isIP(host)) r = V('BadPortIP','IP+非标端口 '+host+':'+port);
       }
     }
-    // 廉价 TLD
-    if(!r.blocked && CFG.cheapTldBlock && isCheapTLD(host)) r = V_CHEAPTLD;
     // Punycode
     if(!r.blocked && CFG.blockPunycode && host.indexOf('xn--')!==-1) r = V_PUNYCODE;
 
