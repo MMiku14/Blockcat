@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ◆ Blockcat /拦猫
 // @namespace    http://tampermonkey.net/
-// @version      2.1.0
-// @description  Rule Pipeline · URL缓存 · 统一拦截入口 · 响应过滤插件 · DPlayer构造前M3U8桥接净化(强制hls.js) · 统一DOM清道夫 · 微任务批处理
+// @version      2.1.1
+// @description  Rule Pipeline · URL缓存 · 统一拦截入口 · 响应过滤插件 · DPlayer构造前M3U8桥接净化(强制hls.js) · 统一DOM清道夫 · 微任务批处理 · 暂存重放Proxy代理
 // @author       cat & Blockcat-Optimizer
 // @match        *://*/*
 // @run-at       document-start
@@ -12,7 +12,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '2.1.0';
+  const VERSION = '2.1.1';
 
   /* ═══ SECTION 1 · CONFIG ═══ */
   const CFG = {
@@ -80,7 +80,6 @@
     scope:(tag)=>({ debug:(m,d)=>emit('DEBUG',tag,m,d), info:(m,d)=>emit('INFO',tag,m,d),
       warn:(m,d)=>emit('WARN',tag,m,d), error:(m,d)=>emit('ERROR',tag,m,d), ok:(m,d)=>emit('SUCCESS',tag,m,d) }) };
 
-  // 日志域空间定义，统一全脚本内部模块日志输出
   const L = {
     bridge: Log.scope('Bridge'), player: Log.scope('Player'), m3u8: Log.scope('M3U8'),
     policy: Log.scope('Policy'), dom: Log.scope('DOM'), init: Log.scope('Init'),
@@ -458,18 +457,35 @@
         try{ const c=(typeof o.container==='string')?document.querySelector(o.container):o.container; if(c&&c.innerHTML!==undefined) c.innerHTML=''; }catch(_){}
 
         let realIns = null;
-        // 构造 ES6 Proxy，完美解决异步桥接完成前，前端对播放器实例行为（如 play/on 等）调用导致的 crash
+        const cmdQueue = []; // 暂存队列，保存桥接完成前的调用：{ prop, args }
+
+        // 构造 ES6 Proxy，暂存异步桥接完成前，前端对播放器实例行为（如 play/pause/on/seek）的调用
         const holder = new Proxy({}, {
           get(t, prop) {
             if (realIns) { const val = realIns[prop]; return typeof val === 'function' ? val.bind(realIns) : val; }
             if (['play', 'pause', 'seek', 'on', 'off', 'destroy'].includes(prop)) {
-              return (...args) => { if (realIns) return realIns[prop](...args); L.player.warn(`代理执行: 实例方法 [${prop}] 在桥接完成前被提前调用。`); };
+              return (...args) => {
+                if (realIns) return realIns[prop](...args);
+                cmdQueue.push({ prop, args }); // 暂存操作
+                L.player.debug(`暂存方法调用: [${prop}]，等待桥接就绪后重放。`);
+              };
             }
             return t[prop];
           },
           set(t, prop, val) { if (realIns) { realIns[prop] = val; return true; } t[prop] = val; return true; },
           getPrototypeOf() { return realIns ? Object.getPrototypeOf(realIns) : Orig.prototype; }
         });
+
+        const replayCmds = () => {
+          while (cmdQueue.length > 0) {
+            const { prop, args } = cmdQueue.shift();
+            try {
+              if (typeof realIns[prop] === 'function') {
+                realIns[prop](...args); L.player.debug(`重放成功: [${prop}]`);
+              }
+            } catch(e) { L.player.error(`重放 [${prop}] 失败: ` + e.message); }
+          }
+        };
 
         bridgeM3U8(original,0).then(blob=>{
           const hlsCtor=window.Hls, next=Object.assign({},o,{
@@ -478,11 +494,11 @@
                 try{ const h=new hlsCtor(); h.loadSource(blob); h.attachMedia(video); L.bridge.ok('hls.js 已接管 blob playlist');
                 }catch(e){ L.bridge.error('hls.js 挂载失败: '+e.message); video.src=blob; } }, }), }), });
           try { const ins=new Orig(next); inc('bridge.dplayerBridge'); L.bridge.ok('DPlayer 构造前桥接成功',{from:original,to:blob});
-            realIns = ins; Object.assign(holder, ins);
+            realIns = ins; Object.assign(holder, ins); replayCmds(); // 成功并重放操作
           } catch(e) { L.bridge.error('DPlayer 构造(净化后)失败: '+e.message);
-            try{ const ins2=new Orig(o); realIns = ins2; Object.assign(holder, ins2); }catch(_){} }
+            try{ const ins2=new Orig(o); realIns = ins2; Object.assign(holder, ins2); replayCmds(); }catch(_){} }
         }).catch(e=>{ L.bridge.warn('DPlayer 构造前桥接失败，回退原始地址: '+e.message,original);
-          try{ const ins3=new Orig(o); realIns = ins3; Object.assign(holder, ins3); }catch(_){} }); return holder; }
+          try{ const ins3=new Orig(o); realIns = ins3; Object.assign(holder, ins3); replayCmds(); }catch(_){} }); return holder; }
       return new Orig(o);
     },'DPlayer');
     Wrapped.prototype=Orig.prototype; for(const k in Orig) try{ Wrapped[k]=Orig[k]; }catch(_){}
