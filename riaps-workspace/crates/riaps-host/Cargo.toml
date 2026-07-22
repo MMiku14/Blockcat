@@ -1,0 +1,12 @@
+[package]
+name = "riaps-host"
+description = "RIAPS 宿主适配器矩阵：CoreAudio / ALSA / Adapter Buffer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# 依赖规则（§1.6）：可依赖 riaps-core, riaps-sys；禁止依赖 riaps-dsp。
+[dependencies]
+riaps-core = { path = "../riaps-core" }
+riaps-sys = { path = "../riaps-sys" }

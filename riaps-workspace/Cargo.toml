@@ -1,0 +1,34 @@
+########################################################################
+# RIAPS 实时音频微内核 — Workspace 根配置
+# 拓扑规范见架构文档 §1.6：四 crate 单向无环依赖
+#   riaps-core  -> (无依赖, no_std)
+#   riaps-sys   -> riaps-core
+#   riaps-host  -> riaps-core, riaps-sys
+#   riaps-dsp   -> riaps-core, riaps-sys   (禁止依赖 riaps-host)
+########################################################################
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/riaps-core",
+    "crates/riaps-sys",
+    "crates/riaps-host",
+    "crates/riaps-dsp",
+]
+
+[workspace.package]
+version = "4.8.1"
+edition = "2021"
+rust-version = "1.82"        # MSRV，见不变式 #14
+license = "MIT OR Apache-2.0"
+repository = "https://example.invalid/riaps"
+
+# 不变式 #11：音频线程强制 panic = abort（release 二进制生效；
+# cargo test 使用 dev profile，不受影响）
+[profile.release]
+panic = "abort"
+lto = "thin"
+codegen-units = 1
+
+[profile.dev]
+opt-level = 1
