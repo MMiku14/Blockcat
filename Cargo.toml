@@ -21,7 +21,6 @@ version = "4.8.1"
 edition = "2021"
 rust-version = "1.82"        # MSRV，见不变式 #14
 license = "MIT OR Apache-2.0"
-repository = "https://example.invalid/riaps"
 
 # 不变式 #11：音频线程强制 panic = abort（release 二进制生效；
 # cargo test 使用 dev profile，不受影响）
@@ -32,3 +31,12 @@ codegen-units = 1
 
 [profile.dev]
 opt-level = 1
+
+# 零警告策略：所有 crate 的 lib/bench/test 编译均将 warnings 升级为错误。
+# 若需临时豁免，在具体代码位置用 `#[allow(...)]` 并附理由，禁止全局关闭。
+[workspace.lints.rust]
+warnings = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+missing_safety_doc = "deny"
